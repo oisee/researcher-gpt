@@ -6,3 +6,8 @@ langchain
 bs4
 tiktoken
 streamlit
+google-search-results
+wikipedia
+playwright
+watchdog
+lxml
