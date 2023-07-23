@@ -3,6 +3,9 @@ from dotenv import load_dotenv
 from langchain import Wikipedia
 from langchain.agents.react.base import DocstoreExplorer
 
+import tiktoken
+
+
 from langchain import PromptTemplate
 from langchain.agents import initialize_agent, Tool
 from langchain.agents import AgentType
@@ -65,6 +68,10 @@ def search(query):
 
     return response.text
 
+def clean_text(text):
+    return ' '.join(text.split())
+
+enc = tiktoken.encoding_for_model("gpt-3.5-turbo-16k")
 
 # 2. Tool for scraping
 def scrape_website(objective: str, url: str):
@@ -91,10 +98,11 @@ def scrape_website(objective: str, url: str):
     # Check the response status code
     if response.status_code == 200:
         soup = BeautifulSoup(response.content, "html.parser")
-        text = soup.get_text()
-        print("CONTENTTTTTT:", text)
+        text = clean_text( soup.get_text() )
+        tokens = len(text)//4
+        print(f"--CONTENT, tokens:{tokens}:---\n", text)
 
-        if len(text) > 10000:
+        if  tokens > 8000:
             output = summary(objective, text)
             return output
         else:
@@ -173,7 +181,7 @@ class ScrapeWebsiteTool(BaseTool):
 
 
 # 3. Create langchain agent with the tools above
-llm = ChatOpenAI(temperature=0, model="gpt-3.5-turbo-16k",max_tokens=8000)
+llm = ChatOpenAI(temperature=0.5, model="gpt-3.5-turbo-16k",max_tokens=8000)
 llm_math_chain = LLMMathChain.from_llm(llm=llm, verbose=True)
 
 tools = tools + [
@@ -220,7 +228,15 @@ for tool in tools:
 system_message = SystemMessage(
     content="""You are a world class researcher, who can do detailed research on any topic and produce facts based results.
             You do not make things up, you will try as hard as possible to gather facts & data to back up the research.
-            
+            You will use the tools below to do research on the objective.
+            You will Explain all the steps you take to do the research, and the result of the research.
+            You will Reflect on the result, and think about what you can do to improve the research quality.
+            You will do 5 to 7 iterations of research.
+
+            For all the found options you will do the detailed explanation which will be sub-research, explaining application or meaning of the option to the objective, and the result of the sub-research.
+            For all the found options you will do the detailed explanation which will be sub-research, explaining application or meaning of the option to the objective, and the result of the sub-research.
+
+
             Please make sure you complete the objective above with the following rules:
             1. You should do enough research to gather as much information as possible about the objective.
             "Search_Google" - Useful for when you need to answer questions about current events, data. You should ask targeted questions.
@@ -228,10 +244,10 @@ system_message = SystemMessage(
             "Search_Wikipedia" for the objective, and use the "Lookup Wikipedia" function to lookup the objective in the Wikipedia database.
             "extract_text" to Extract all the text on the current webpage
             "extract_hyperlinks" Extract all hyperlinks on the current webpage
-            3. After browser & search, you should think "is there any new things I should search & scraping based on the data I collected to increase research quality?" If answer is yes, continue; Do from 3 to 5 iterations.
+            3. After browser & search, you should think "is there any new things I should search & scraping based on the data I collected to increase research quality?" If answer is yes, continue; Do from 5 to 7 iterations.
             4. Reflect on result.
             5. You should not make things up, you should only write facts & data that you have gathered. 
-            6. Try to at least first 3 to 5 links of the search results, and browser the content of the website to gather more information.
+            6. Try to visit at least first 5 links of the search results, and browser the content of the website to gather more information.
             7. You should not write anything that is not related to the objective.
             8. In the final output, You should include all reference data & links to back up your research; You should include all reference data & links to back up your research.
             9. In the final output, You should include all reference data & links to back up your research; You should include all reference data & links to back up your research.
@@ -243,35 +259,18 @@ agent_kwargs = {
     "system_message": system_message,
 }
 
+llm = ChatOpenAI(temperature=0, model="gpt-3.5-turbo-16k",max_tokens=8000)
 memory = ConversationSummaryBufferMemory(
-    memory_key="memory", return_messages=True, llm=llm, max_token_limit=8000
-)
+    memory_key="memory", return_messages=True, llm=llm, max_token_limit=8000)
 
 agent = initialize_agent(
     tools,
     llm,
-    agent=AgentType.OPENAI_MULTI_FUNCTIONS,
+    agent=AgentType.OPENAI_FUNCTIONS,
     verbose=True,
     agent_kwargs=agent_kwargs,
     memory=memory,
 )
-
-
-def bake_agent(llm,system_message):
-    #planner = load_chat_planner(llm=llm, system_prompt=system_message)
-    #executor = load_agent_executor(llm=llm, tools=tools, verbose=True, include_task_in_prompt=True)
-    agent = initialize_agent(
-        tools,
-        llm,
-        agent=AgentType.OPENAI_FUNCTIONS,
-        verbose=True,
-        agent_kwargs=agent_kwargs,
-        memory=memory,
-    )
-
-    #agent = PlanAndExecute(planner=planner, executor=executor, verbose=True)
-    return agent
-
 
 
 # 4. Use streamlit to create a web app
@@ -284,31 +283,10 @@ def main():
     if query:
         st.write("Doing research for ", query)
 
-        # st.info("Agent baked,agent ready to run")
-        #result = agent({"input": query})
-        result = agent.run(query)
-        #result = agent.run("Who is Leo DiCaprio's girlfriend? What is her current age raised to the 0.43 power?")
-        st.info(result)
+        result = agent({"input": query})
 
-        # summ = summary(query, result["output"])
-        # st.info(summ)
+        st.info(result['output'])
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()
-
-
-# # 5. Set this as an API endpoint via FastAPI
-# app = FastAPI()
-
-
-# class Query(BaseModel):
-#     query: str
-
-
-# @app.post("/")
-# def researchAgent(query: Query):
-#     query = query.query
-#     content = agent({"input": query})
-#     actual_content = content['output']
-#     return actual_content
